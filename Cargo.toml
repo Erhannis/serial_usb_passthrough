@@ -17,3 +17,4 @@ defmt-rtt = "0.4"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 cortex-m = "0.7.5"
 cortex-m-rt = "0.7.5"
+ringbuffer = { version = "0.16.0", default-features = false }

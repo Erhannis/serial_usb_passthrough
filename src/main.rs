@@ -10,7 +10,8 @@ pub static BOOT2_FIRMWARE: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
 use defmt::{info, println};
 use embedded_hal::digital::{OutputPin, StatefulOutputPin};
-use rp2040_hal::{gpio::Pins, Clock};
+use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
+use rp2040_hal::{fugit::RateExtU32, gpio::Pins, uart::{DataBits, StopBits, UartConfig, UartPeripheral}, Clock};
 use usb_device::{bus::UsbBusAllocator, device::{StringDescriptors, UsbDeviceBuilder, UsbVidPid}, UsbError};
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
 use core::result::Result::{Err, Ok};
@@ -20,6 +21,7 @@ use defmt_rtt as _;
 /// External high-speed crystal on the Raspberry Pi Pico board is 12 MHz. Adjust
 /// if your board has a different frequency
 const XTAL_FREQ_HZ: u32 = 12_000_000u32;
+pub const BAUD: u32 = 115200;
 
 #[rp2040_hal::entry]
 fn main() -> ! {
@@ -81,65 +83,124 @@ fn main() -> ! {
         .device_class(USB_CLASS_CDC)
         .build();
     
-    // let mut gpioTx = pins.gpio4; //RAINY This conflicts with optics - but I guess also in the sense that we only have so many uarts
-    // let mut gpioRx = pins.gpio5;
-    //
-    // let tx_pinid = gpioTx.id();
-    //
-    // let uart_pins = (
-    //   gpioTx.into_function(),
-    //   gpioRx.into_function(),
-    // );
-    // let uart = UartPeripheral::new(peripherals.UART1, uart_pins, &mut peripherals.RESETS)
-    //   .enable(
-    //     UartConfig::new(BAUD.Hz(), DataBits::Eight, None, StopBits::One),
-    //     clocks.peripheral_clock.freq(),
-    //   ).unwrap();
+
+
+    let mut gpioTx = pins.gpio4; //RAINY This conflicts with optics - but I guess also in the sense that we only have so many uarts
+    let mut gpioRx = pins.gpio5;
+    
+    let tx_pinid = gpioTx.id();
+    
+    let uart_pins = (
+      gpioTx.into_function(),
+      gpioRx.into_function(),
+    );
+    let uart = UartPeripheral::new(pac.UART1, uart_pins, &mut pac.RESETS)
+      .enable(
+        UartConfig::new(BAUD.Hz(), DataBits::Eight, None, StopBits::One),
+        clocks.peripheral_clock.freq(),
+      ).unwrap();
+
+    const SIZE: usize = 128;
+    let mut buf_usb2uart = ConstGenericRingBuffer::<u8, SIZE>::new();
+    let mut buf_uart2usb = ConstGenericRingBuffer::<u8, SIZE>::new();
 
     loop {
       info!("Loop start");
       pin.toggle().unwrap();
-      delay.delay_ms(10);
+      delay.delay_ms(5);
       if !usb_dev.poll(&mut [&mut serial]) {
-          info!("Poll fail");
-          continue;
+        info!("Poll fail");
+        // continue; // It seems like poll ACTUALLY only succeeds when there's data to be read.  We may need to WRITE data.
+      } else {
+        info!("Poll succeed");
       }
-      info!("Poll succeed");
 
-      let mut buf = [0u8; 64];
-
-      let count = match serial.read(&mut buf[..]) {
-          Ok(count) => {
-            info!("read {}", count);
-            // count bytes were read to &buf[..count]
-            count
-          },
-          Err(UsbError::WouldBlock) => {
-            info!("read would block");
-            // No data received
-            0
-          },
-          Err(err) => {
-            info!("read error");
-            // An error occurred
-            0
-          },
+      // Copy as many bytes from usb as are available in ring
+      let mut temp_usb2uart = [0u8; SIZE];
+      let usb_in_count = match serial.read(&mut temp_usb2uart[0..(buf_usb2uart.capacity() - buf_usb2uart.len())]) {
+        Ok(count) => {
+          info!("1>2 read {}", count);
+          // count bytes were read to &buf[..count]
+          count
+        },
+        Err(UsbError::WouldBlock) => {
+          info!("1>2 read would block");
+          // No data received
+          0
+        },
+        Err(err) => {
+          info!("1>2 read error");
+          // An error occurred
+          0
+        },
       };
+      // Copy bytes to ring
+      for &b in &temp_usb2uart[0..usb_in_count] {
+        buf_usb2uart.enqueue(b);
+      }
+      // Copy ring to uart
+      let mut remaining_usb2uart = buf_usb2uart.len();
+      buf_usb2uart.copy_to_slice(0, &mut temp_usb2uart[0..remaining_usb2uart]);
+      match uart.write_raw(&temp_usb2uart[0..remaining_usb2uart]) {
+        Ok(remaining) => {
+          let written = remaining_usb2uart - remaining.len();
+          info!("1>2 wrote {}", written);
+          for _ in 0..written {
+            buf_usb2uart.dequeue();
+          }
+        },
+        Err(nb::Error::WouldBlock) => {
+          info!("2>1 write would block");
+          //CHECK This shouldn't be possible, by the signature; what's up with this
+        },
+      }
 
-      let buf_out: &[u8] = if count > 0 { &buf[0..count] } else { b"hello\r\n" };
-      match serial.write(buf_out) {
-          Ok(count) => {
-            info!("wrote {}", count);
-            // count bytes were written
-          },
-          Err(UsbError::WouldBlock) => {
-            info!("write would block");
+
+      // Copy as many bytes from uart as are available in ring
+      let mut temp_uart2usb = [0u8; SIZE];
+      let uart_in_count = match uart.read_raw(&mut temp_uart2usb[0..(buf_uart2usb.capacity() - buf_uart2usb.len())]) {
+        Ok(count) => {
+          info!("2>1 read {}", count);
+          // count bytes were read to &buf[..count]
+          count
+        },
+        Err(nb::Error::WouldBlock) => {
+          info!("2>1 read would block");
+          // No data received
+          0
+        },
+        Err(err) => {
+          info!("2>1 read error");
+          // An error occurred
+          0
+        },
+      };
+      // Copy bytes to ring
+      for &b in &temp_uart2usb[0..uart_in_count] {
+        buf_uart2usb.enqueue(b);
+      }
+      // Copy ring to usb
+      let mut remaining_uart2usb = buf_uart2usb.len();
+      buf_uart2usb.copy_to_slice(0, &mut temp_uart2usb[0..remaining_uart2usb]);
+      match serial.write(&temp_uart2usb[0..remaining_uart2usb]) {
+        Ok(written) => {
+          info!("2>1 wrote {}", written);
+          for _ in 0..written {
+            buf_uart2usb.dequeue();
+          }
+        },
+        Err(UsbError::WouldBlock) => {
+          if remaining_uart2usb == 0 {
+            info!("2>1 nothing to write");
+          } else {
             // No data could be written (buffers full)
-          },
-          Err(err) => {
-            info!("write error");
-            // An error occurred
-          },
-      };
+            info!("2>1 write would block");
+          }
+        },
+        Err(err) => {
+          info!("2>1 write error");
+          // An error occurred
+        },
+      }
     }
 }
