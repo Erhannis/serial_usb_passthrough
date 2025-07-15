@@ -5,7 +5,9 @@ edition = "2024"
 
 [dependencies]
 rp2040-hal = { version = "0.10", features = ["rt", "critical-section-impl", "defmt"] }
+rp2040-boot2 = "0.3"
 embedded-hal = { version = "1.0.0" }
+embedded-hal-bus = "0.3.0"
 usb-device = "0.3.2"
 usbd-serial = "0.2.2"
 nb = "1"
