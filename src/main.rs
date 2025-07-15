@@ -36,9 +36,8 @@ fn main() -> ! {
 
     let pins = Pins::new(pac.IO_BANK0, pac.PADS_BANK0, sio.gpio_bank0, &mut pac.RESETS);
 
-    let mut pin = pins.gpio0.into_push_pull_output();
-
-    pin.set_low().unwrap();
+    // let mut pin = pins.gpio0.into_push_pull_output();
+    // pin.set_low().unwrap();
 
     // Set up the watchdog driver - needed by the clock setup code
     let mut watchdog = rp2040_hal::Watchdog::new(pac.WATCHDOG);
@@ -129,15 +128,17 @@ fn main() -> ! {
     let mut buf_usb2uart = ConstGenericRingBuffer::<u8, SIZE>::new();
     let mut buf_uart2usb = ConstGenericRingBuffer::<u8, SIZE>::new();
 
+    const V: bool = false;
+
     loop {
-      info!("Loop start");
-      pin.toggle().unwrap();
+      if V { info!("Loop start"); }
+      // pin.toggle().unwrap();
       // delay.delay_ms(5);
       if !usb_dev.poll(&mut [&mut serial]) {
-        info!("Poll fail");
+        if V { info!("Poll fail"); }
         // continue; // It seems like poll ACTUALLY only succeeds when there's data to be read.  We may need to WRITE data.
       } else {
-        info!("Poll succeed");
+        if V { info!("Poll succeed"); }
       }
 
       // Copy as many bytes from usb as are available in ring
@@ -149,7 +150,7 @@ fn main() -> ! {
           count
         },
         Err(UsbError::WouldBlock) => {
-          info!("1>2 read would block");
+          if V { info!("1>2 read would block"); }
           // No data received
           0
         },
@@ -169,7 +170,9 @@ fn main() -> ! {
       match uart.write_raw(&temp_usb2uart[0..remaining_usb2uart]) {
         Ok(remaining) => {
           let written = remaining_usb2uart - remaining.len();
-          info!("1>2 wrote {}", written);
+          if written > 0 || V {
+            info!("1>2 wrote {}", written);
+          }
           for _ in 0..written {
             buf_usb2uart.dequeue();
           }
@@ -190,7 +193,7 @@ fn main() -> ! {
           count
         },
         Err(nb::Error::WouldBlock) => {
-          info!("2>1 read would block");
+          if V { info!("2>1 read would block"); }
           // No data received
           0
         },
@@ -216,7 +219,7 @@ fn main() -> ! {
         },
         Err(UsbError::WouldBlock) => {
           if remaining_uart2usb == 0 {
-            info!("2>1 nothing to write");
+            if V { info!("2>1 nothing to write"); }
           } else {
             // No data could be written (buffers full)
             info!("2>1 write would block");
