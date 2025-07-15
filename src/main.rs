@@ -84,12 +84,37 @@ fn main() -> ! {
         .build();
     
 
+    const FLASH: bool = false;
+    {
+      let mut ehat_enable_pin = pins.gpio10.into_push_pull_output();
+      let mut ehat_flash_pin = pins.gpio7.into_push_pull_output();      
+      let mut ehat_reset_pin = pins.gpio8.into_push_pull_output();      
+      let mut ehat_gpio2_pin = pins.gpio9.into_push_pull_output();     
+      let mut ehat_vcc_pin = pins.gpio6.into_push_pull_output();     
+      let mut ehat_gnd_pin = pins.gpio11.into_push_pull_output();     
+
+      ehat_vcc_pin.set_high().unwrap(); // This is almost certainly insufficient current
+      ehat_gnd_pin.set_low().unwrap(); // Ditto
+      ehat_gpio2_pin.set_high().unwrap();
+      // Set low to flash
+      if FLASH {
+        ehat_flash_pin.set_low().unwrap();
+      } else {
+        ehat_flash_pin.set_high().unwrap();
+      }
+      ehat_enable_pin.set_high().unwrap();
+
+      ehat_reset_pin.set_low().unwrap();
+      delay.delay_ms(10);
+      ehat_reset_pin.set_high().unwrap();
+
+      // The RX/TX pins, 04 and 05, are handled as part of uart_pins
+    }
+
 
     let mut gpioTx = pins.gpio4; //RAINY This conflicts with optics - but I guess also in the sense that we only have so many uarts
     let mut gpioRx = pins.gpio5;
-    
-    let tx_pinid = gpioTx.id();
-    
+        
     let uart_pins = (
       gpioTx.into_function(),
       gpioRx.into_function(),
@@ -107,7 +132,7 @@ fn main() -> ! {
     loop {
       info!("Loop start");
       pin.toggle().unwrap();
-      delay.delay_ms(5);
+      // delay.delay_ms(5);
       if !usb_dev.poll(&mut [&mut serial]) {
         info!("Poll fail");
         // continue; // It seems like poll ACTUALLY only succeeds when there's data to be read.  We may need to WRITE data.
