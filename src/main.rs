@@ -85,15 +85,21 @@ fn main() -> ! {
 
     const FLASH: bool = false;
     {
-      let mut ehat_enable_pin = pins.gpio10.into_push_pull_output();
-      let mut ehat_flash_pin = pins.gpio7.into_push_pull_output();      
-      let mut ehat_reset_pin = pins.gpio8.into_push_pull_output();      
-      let mut ehat_gpio2_pin = pins.gpio9.into_push_pull_output();     
-      let mut ehat_vcc_pin = pins.gpio6.into_push_pull_output();     
-      let mut ehat_gnd_pin = pins.gpio11.into_push_pull_output();     
+      // The hat takes up the entire bank from 02-15, plus 3v3 and gnd
+      pins.gpio2.into_floating_disabled();
+      pins.gpio3.into_floating_disabled();
+      // The RX/TX pins, 04 and 05, are handled as part of uart_pins
+      let mut ehat_enable_pin = pins.gpio6.into_push_pull_output();
+      pins.gpio7.into_floating_disabled();
+      let mut ehat_reset_pin = pins.gpio8.into_push_pull_output();
+      let mut ehat_gpio2_pin = pins.gpio9.into_push_pull_output();
+      pins.gpio10.into_floating_disabled();
+      pins.gpio11.into_floating_disabled();
+      let mut ehat_flash_pin = pins.gpio12.into_push_pull_output();
+      pins.gpio13.into_floating_disabled();
+      pins.gpio14.into_floating_disabled();
+      pins.gpio15.into_floating_disabled();
 
-      ehat_vcc_pin.set_high().unwrap(); // This is almost certainly insufficient current
-      ehat_gnd_pin.set_low().unwrap(); // Ditto
       ehat_gpio2_pin.set_high().unwrap();
       // Set low to flash
       if FLASH {
@@ -106,8 +112,6 @@ fn main() -> ! {
       ehat_reset_pin.set_low().unwrap();
       delay.delay_ms(10);
       ehat_reset_pin.set_high().unwrap();
-
-      // The RX/TX pins, 04 and 05, are handled as part of uart_pins
     }
 
 
